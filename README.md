@@ -154,7 +154,6 @@ A one minute delay is applied before the task starts so autoenrollment has finis
 
 ## Additional Resources
 
-- [Enable LDAP over SSL with a third-party certification authority](https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/enable-ldap-over-ssl-3rd-certification-authority)
 - [ServiceCertStore PowerShell Module](https://www.powershellgallery.com/packages/ServiceCertStore/)
 - [Richard M. Hicks Consulting Blog](https://directaccess.richardhicks.com/)
 - [LDAPS GitHub Repository](https://github.com/richardhicks/ldaps/)
