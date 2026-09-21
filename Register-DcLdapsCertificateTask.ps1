@@ -1,9 +1,11 @@
 <#
 
 .SYNOPSIS
-    Registers a scheduled task that runs Update-DcLdapsCertificate.ps1 whenever a new server authentication certificate is installed in the local machine certificate store on a domain controller.
+    Registers a scheduled task that runs Update-DcLdapsCertificate.ps1 whenever a new server authentication certificate is installed in the local machine certificate store on a domain controller deployed behind a load balancer for highly available LDAP over TLS (LDAPS).
 
 .DESCRIPTION
+    This script is intended for domain controllers deployed behind a load balancer to provide a highly available LDAPS service. Clients connect to a single LDAPS service name (for example, ldaps.lab.richardhicks.net) that resolves to the load balancer's virtual IP address, so every domain controller in the pool must serve a certificate that includes that name in the subject alternative name. Run this script on each domain controller in the pool.
+
     Certificate autoenrollment places a new or renewed LDAPS certificate in the local machine personal store, but Active Directory Domain Services (AD DS) does not use it until it is copied to the NTDS service certificate store. This script registers a scheduled task that runs Update-DcLdapsCertificate.ps1 in response to the certificate installation event, so the NTDS store is updated as soon as autoenrollment completes.
 
     The task is triggered only by events. It has no time-based trigger and never runs on a schedule. The trigger subscribes to the Microsoft-Windows-CertificateServicesClient-Lifecycle-System/Operational log and fires on event ID 1006 (a new certificate has been installed) or event ID 1001 (a certificate has been replaced) where the certificate was installed in the machine context and includes the Server Authentication enhanced key usage. Certificates installed in a user context, and machine certificates without the Server Authentication EKU, do not trigger the task. A one minute delay is applied before the task starts so autoenrollment has finished writing the certificate and private key.
@@ -13,14 +15,17 @@
     - Verifies that Update-DcLdapsCertificate.ps1 exists at the specified path.
     - Ensures the Microsoft-Windows-CertificateServicesClient-Lifecycle-System/Operational event log is enabled. This log is the source of the trigger event and is enabled by default, but is re-enabled if it has been turned off.
     - Sets the AEEventLogLevel registry value to 0 so autoenrollment writes detailed events to the Application log. This does not affect the trigger but provides a record of each autoenrollment pass for troubleshooting.
-    - Registers the scheduled task to run as SYSTEM with highest privileges, using Windows PowerShell to execute Update-DcLdapsCertificate.ps1 with the specified template OID. Update-DcLdapsCertificate.ps1 writes its own transcript log with verbose output always enabled, so no additional logging parameters are passed. An existing task with the same name is replaced.
+    - Registers the scheduled task to run as SYSTEM with highest privileges, using Windows PowerShell to execute Update-DcLdapsCertificate.ps1 with the specified template OID and LDAPS service name. Update-DcLdapsCertificate.ps1 writes its own transcript log with verbose output always enabled, so no additional logging parameters are passed. An existing task with the same name is replaced.
 
-    Because certificate installation events are also raised when a certificate is installed manually, the task can run in response to a manual installation of a qualifying certificate. Update-DcLdapsCertificate.ps1 is idempotent and only binds a certificate issued from the specified template, so this has no effect unless the installed certificate qualifies.
+    Because certificate installation events are also raised when a certificate is installed manually, the task can run in response to a manual installation of a qualifying certificate. Update-DcLdapsCertificate.ps1 is idempotent and only binds a certificate issued from the specified template that includes the LDAPS service name, so this has no effect unless the installed certificate qualifies.
 
     All changes support -WhatIf and -Confirm. This script requires Administrator privileges and Windows PowerShell 5.1.
 
 .PARAMETER TemplateOid
     The object identifier (OID) of the certificate template used to issue the LDAPS certificate. This value is passed to Update-DcLdapsCertificate.ps1 each time the task runs.
+
+.PARAMETER LdapsServiceName
+    The fully qualified DNS name clients use to connect to the load balanced LDAPS service, for example ldaps.lab.richardhicks.net. This value is passed to Update-DcLdapsCertificate.ps1 each time the task runs, and only certificates that include this name in the subject alternative name are bound. The domain controller's own fully qualified domain name is not required to be present on the certificate.
 
 .PARAMETER ScriptPath
     The full path to Update-DcLdapsCertificate.ps1. The default is a file of that name in the same folder as this script. The file must exist when the task is registered.
@@ -35,17 +40,17 @@
     None. Progress is reported using Write-Verbose.
 
 .EXAMPLE
-    .\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042'
+    .\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.lab.richardhicks.net'
 
-    Registers the scheduled task using Update-DcLdapsCertificate.ps1 from the same folder as this script.
+    Registers the scheduled task using Update-DcLdapsCertificate.ps1 from the same folder as this script. Each time the task runs, only certificates issued from the specified template that include ldaps.lab.richardhicks.net in the subject alternative name are bound.
 
 .EXAMPLE
-    .\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -ScriptPath 'C:\Scripts\Update-DcLdapsCertificate.ps1' -Verbose
+    .\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.lab.richardhicks.net' -ScriptPath 'C:\Scripts\Update-DcLdapsCertificate.ps1' -Verbose
 
     Registers the scheduled task using a copy of Update-DcLdapsCertificate.ps1 in C:\Scripts, with detailed progress output.
 
 .EXAMPLE
-    .\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -WhatIf
+    .\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.lab.richardhicks.net' -WhatIf
 
     Shows the event log, registry, and scheduled task changes that would be made without making them.
 
@@ -80,6 +85,10 @@ Param (
     [Parameter(Mandatory, HelpMessage = 'Enter the OID of the certificate template used to issue the LDAPS certificate.')]
     [ValidatePattern('^\d+(\.\d+)+$')]
     [string]$TemplateOid,
+
+    [Parameter(Mandatory, HelpMessage = 'Enter the fully qualified DNS name clients use to connect to the load balanced LDAPS service, for example ldaps.lab.richardhicks.net.')]
+    [ValidatePattern('^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$')]
+    [string]$LdapsServiceName,
 
     [ValidateNotNullOrEmpty()]
     [string]$ScriptPath = (Join-Path -Path $PSScriptRoot -ChildPath 'Update-DcLdapsCertificate.ps1'),
@@ -175,7 +184,7 @@ $Trigger.Delay = $TriggerDelay
 $Trigger.Enabled = $true
 
 # Action: run the update script with Windows PowerShell, bypassing execution policy and hiding the window. The update script enables verbose output itself so its transcript is complete without any additional parameters.
-$Argument = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -TemplateOid {1}' -f $ScriptPath, $TemplateOid
+$Argument = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -TemplateOid {1} -LdapsServiceName {2}' -f $ScriptPath, $TemplateOid, $LdapsServiceName
 $Action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument $Argument
 
 # Principal: run as SYSTEM with highest privileges. The NTDS service certificate store and the private key require this level of access.
@@ -184,7 +193,7 @@ $Principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType
 # Settings: a single instance at a time, with a time limit so a hung run cannot block the next trigger
 $Settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
-$Description = "Runs Update-DcLdapsCertificate.ps1 to bind a newly installed certificate issued from template $TemplateOid to the NTDS service certificate store for LDAPS. Triggered by certificate lifecycle events 1001 and 1006. This task has no time-based trigger."
+$Description = "Runs Update-DcLdapsCertificate.ps1 to bind a newly installed certificate issued from template $TemplateOid and containing the LDAPS service name $LdapsServiceName to the NTDS service certificate store for load balanced LDAPS. Triggered by certificate lifecycle events 1001 and 1006. This task has no time-based trigger."
 
 # Register the task, replacing any existing task with the same name
 If ($PSCmdlet.ShouldProcess("Scheduled task '$TaskName'", 'Register event-triggered task')) {
@@ -218,10 +227,10 @@ If ($PSCmdlet.ShouldProcess("Scheduled task '$TaskName'", 'Register event-trigge
 }
 
 # SIG # Begin signature block
-# MIIk7QYJKoZIhvcNAQcCoIIk3jCCJNoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIk6wYJKoZIhvcNAQcCoIIk3DCCJNgCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAIvtCgxU8miH3i
-# gHFWVsZGBD7gaS0ug74GHIXzDOKZg6CCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPp2NpPXQqqyOB
+# W5q8+4Fm/9M24Xlpa2TE4vwlv+iI5qCCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -390,30 +399,29 @@ If ($PSCmdlet.ShouldProcess("Scheduled task '$TaskName'", 'Register event-trigge
 # 3FLje1O5b3HR5eHs0NzU/+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94l
 # bUveOiJBI+xZEbGRsMNbXmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H
 # 5Mh7QfieAIjWagkJNt68Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCya
-# tf8R1hSjzSvdN8yWQPT9gzGCBJ0wggSZAgEBMH0waTELMAkGA1UEBhMCVVMxFzAV
+# tf8R1hSjzSvdN8yWQPT9gzGCBJswggSXAgEBMH0waTELMAkGA1UEBhMCVVMxFzAV
 # BgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVk
 # IEc0IENvZGUgU2lnbmluZyBSU0E0MDk2IFNIQTM4NCAyMDIxIENBMQIQDsYrSCrm
 # UJuvTRscProh/zANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBy5inTVw3LO2w1fahPEmUC
-# OoTWWOVD1TeOVO+pZzD2/jALBgcqhkjOPQIBBQAESDBGAiEA9bd6vfsJFsj1A6RL
-# W5c1R2Hgd+HZka3LXvS91BTta+kCIQC/74eJ62qnC7EIoKCBuRE96dBhLJSkzzDy
-# WUdJKyuN9KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNV
-# BAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNl
-# cnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBD
-# QTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0B
-# CQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMjAwMDRaMC8G
-# CSqGSIb3DQEJBDEiBCA0TpvsOtKruymtY0rDU5S84MPPVO8uXQhtKU3612coYzAN
-# BgkqhkiG9w0BAQEFAASCAgC0ReL7XaClIop1kWmmvnzkPQUbghycVSZJaeSDYBsl
-# p2cEYtGyG+H8LIFlp/quWx651iJgvNBX5Y7ifyhWxiiYSqQmMu1zUEurxEO2yk/r
-# VLsFuvEjF3bKDcFFSq3Rmo6DWUHrTqY2YSH4dYy4R4lngmfhh5Agxf++FXD5EibS
-# EJpLsfjWvd+labjPerxuKLTd7NHP3ml5ryyj6iCfq4tTceh6kpeYyCYri1+cAtVM
-# /GkBHInRhocMBll5kA7lfNeBNXA0hdqrF5N1/mHl+v80imTxSeOHEoa8WWB3Yh2n
-# 5IhHCzt0wx7R0Nf8E+FG3UKzCtuod5vhp4sJPViGNb3ac1Ff0lIQCT3qt7J2tn7p
-# Ului3XHHRZ33OyxjudkYsPoj3mysKc6+Pt3IFjIpXqr7XAJ77YecA4Nlgl6v6sgq
-# tkFBm0YA3VJeqdzJctwxexbDtZ4thLfnAsM2vJcJ2UPMpxT5ZU9y161MV3gbwKB4
-# TAvZT8+09ZSwaprYZWGA2YHs+n6kCuzNQK/uJRSFwAvlEHWGSZs1FsOZ8wl6Rqvp
-# SAGEaOLbDwKoVWToQ/K0fK+FGI9gZh88NdvjAZGO4VfTgTaNNNU2URCgslNN3v79
-# /AbOIqp/p5fe3HbXUVVk8nUwdEJ8/UOYS+qgSVb2o8YdfxQaMmQ2VxLrp5HQkQh5
-# RQ==
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAusq8xAZWYIGjKBw15tolL
+# K7L/IL6sdjHPApp5kmruGTALBgcqhkjOPQIBBQAERjBEAiAY4WG8vxgtLlAB+K/o
+# r/EhKQAv+NdRQjD1I3djm80/NQIgacyprJ0I9aaZohUjTLBXp0GhRzGfDUh7yr5/
+# 6OQxeCShggMmMIIDIgYJKoZIhvcNAQkGMYIDEzCCAw8CAQEwfTBpMQswCQYDVQQG
+# EwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0
+# IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0Ex
+# AhAIT9wzT35FTtvDD4/5khg1MA0GCWCGSAFlAwQCAQUAoGkwGAYJKoZIhvcNAQkD
+# MQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcNMjYwOTIxMjIyNjMzWjAvBgkq
+# hkiG9w0BCQQxIgQgPy60uokTnYXLVv1HHdqvCyX2K3csVoz4hy3+xHprWMcwDQYJ
+# KoZIhvcNAQEBBQAEggIAeGkWWcG9eJCN+DlR2fAEM4lisHFGv3JrwZpl/NNRcyZy
+# msFeBCrt8LT3BkyBSTnW8lxZUlji24Ugus4DGF3iKVW9Mgu0BNL7LBkQpQwn71jY
+# LKLRv3Qt4Cu/+VlFwUB6nMyvy16u0AW8XBfSzj0w8u7Jedzmktw1vOY9ppOT/7xo
+# 5sqbZWV8Nlpnkm2P4X171AOglAXdBl1QzSgzlcg9SmvcZvCI4z7KAmjj9ds8X+iU
+# LgZn0ag/Wcgl3XqfxNu+A9dyiyM53X/J7wJmXW2fwQPaWZp/+1ihe9b27dlzY6mS
+# I/Cuew8FND5AI7in4RSRZS9CqgrYF4++qbeDN+rKtwemZBjXMOEe5eMFhLqVL7qo
+# aRGahlRuVgmpY4kq8Z9Lu7i5inkVdC2EelafudqoBFXyg1WZsMv3Qxwo6AUBavVd
+# +RVCWZzF4xC5JLEALsvyWXJuSSQ7AHHFzwAYOuIgbJZRYARhHh4i74A6QQuV6VAf
+# Yh3dhh3CO1LhcohC5aiTrwAgG4roYerxNgV53wWZtIRKNcFNEEbF1vpK1kyESz7l
+# YpaFwBYzBtHTs6mC2YhKI4pi38Qvc0g1nM6osbBlvx8HTOVo098UwHhhzXB8jUzf
+# QkSS4JWKiL2ctmNPFTd8hgHrpgGwqcTv+WBwCyQCYETprxX2WRFMP+yTWdjYRYA=
 # SIG # End signature block

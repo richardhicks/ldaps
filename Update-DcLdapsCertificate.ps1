@@ -1,14 +1,16 @@
 <#
 
 .SYNOPSIS
-    Binds the newest valid certificate issued from a specified certificate template to the NTDS service certificate store on a domain controller for LDAP over TLS (LDAPS).
+    Binds the newest valid certificate issued from a specified certificate template and containing the LDAPS service name to the NTDS service certificate store on a domain controller deployed behind a load balancer for highly available LDAP over TLS (LDAPS).
 
 .DESCRIPTION
+    This script is intended for domain controllers deployed behind a load balancer to provide a highly available LDAPS service. Clients connect to a single LDAPS service name (for example, ldaps.lab.richardhicks.net) that resolves to the load balancer's virtual IP address, and the load balancer distributes connections across the domain controllers in the pool. For clients to validate the connection, every domain controller in the pool must serve a certificate that includes the LDAPS service name in the subject alternative name. The certificate is not required to include the domain controller's own fully qualified domain name.
+
     Active Directory Domain Services (AD DS) preferentially uses certificates in the NTDS service's personal certificate store for LDAPS. Certificates enrolled or renewed through autoenrollment land in the local machine personal store, not the NTDS store, so they are not used for LDAPS until they are copied there. This script automates that step so LDAPS certificates can be renewed without manual intervention.
 
     The following actions are performed:
 
-    - Searches the local machine personal certificate store for certificates issued from the specified template OID. Only certificates that are time valid, have an associated private key, include the Server Authentication enhanced key usage, contain the domain controller's fully qualified domain name in the subject alternative name, and chain to a trusted root are considered. If more than one certificate qualifies, the one with the latest expiration date is selected.
+    - Searches the local machine personal certificate store for certificates issued from the specified template OID. Only certificates that are time valid, have an associated private key, include the Server Authentication enhanced key usage, contain the LDAPS service name in the subject alternative name, and chain to a trusted root are considered. If more than one certificate qualifies, the one with the latest expiration date is selected.
     - Reads the certificates currently bound to the NTDS service store. If the selected certificate is already bound, the import step is skipped.
     - Imports the selected certificate into the NTDS service store and reads the store back to confirm the certificate was added. If verification fails, the script terminates and no existing certificates are removed.
     - Removes any other certificates from the NTDS service store. The newly bound certificate is never removed.
@@ -30,10 +32,13 @@
     2003 (Warning) - Unable to complete a TLS handshake to verify the LDAPS certificate.
     3000 (Error) - The script terminated with an error. No changes are made after this point.
 
-    This script requires Administrator privileges, Windows PowerShell 5.1, and the ServiceCertStore PowerShell module (https://www.powershellgallery.com/packages/ServiceCertStore/).
+    This script requires Administrator privileges, Windows PowerShell 5.1, and the ServiceCertStore PowerShell module (https://www.powershellgallery.com/packages/ServiceCertStore/). Run it on each domain controller in the load balanced pool.
 
 .PARAMETER TemplateOid
     The object identifier (OID) of the certificate template used to issue the LDAPS certificate. The template OID can be found in the Certificate Templates console (certtmpl.msc) on the Extensions tab of the template under Certificate Template Information, or by running Get-CertificateTemplate from the ADCSTemplate module.
+
+.PARAMETER LdapsServiceName
+    The fully qualified DNS name clients use to connect to the load balanced LDAPS service, for example ldaps.lab.richardhicks.net. Only certificates that include this name in the subject alternative name are considered for binding. The domain controller's own fully qualified domain name is not required to be present on the certificate.
 
 .INPUTS
     None.
@@ -42,12 +47,12 @@
     None. Progress is reported using Write-Verbose, which is always enabled so the transcript is complete. Warnings are issued if a certificate cannot be removed or if LDAPS is not yet serving the new certificate. A transcript of each run is written to %ProgramData%\RMHCI\PowerShell\Update-DcLdapsCertificate.log, and key outcomes are written to the Application event log.
 
 .EXAMPLE
-    .\Update-DcLdapsCertificate.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042'
+    .\Update-DcLdapsCertificate.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.lab.richardhicks.net'
 
-    Finds the newest valid certificate issued from the specified template in the local machine personal store, binds it to the NTDS service store, removes any other certificates from the NTDS store, and signals AD DS to reload its LDAPS certificate.
+    Finds the newest valid certificate issued from the specified template that includes ldaps.lab.richardhicks.net in the subject alternative name, binds it to the NTDS service store, removes any other certificates from the NTDS store, and signals AD DS to reload its LDAPS certificate.
 
 .EXAMPLE
-    .\Update-DcLdapsCertificate.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -WhatIf
+    .\Update-DcLdapsCertificate.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.lab.richardhicks.net' -WhatIf
 
     Shows which certificate would be imported into the NTDS service store and which certificates would be removed, without making any changes.
 
@@ -82,7 +87,11 @@ Param (
 
     [Parameter(Mandatory, HelpMessage = 'Enter the OID of the certificate template used to issue the LDAPS certificate.')]
     [ValidatePattern('^\d+(\.\d+)+$')]
-    [string]$TemplateOid
+    [string]$TemplateOid,
+
+    [Parameter(Mandatory, HelpMessage = 'Enter the fully qualified DNS name clients use to connect to the load balanced LDAPS service, for example ldaps.lab.richardhicks.net.')]
+    [ValidatePattern('^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$')]
+    [string]$LdapsServiceName
 
 )
 
@@ -177,13 +186,13 @@ Try {
     # The certificate template information extension is displayed as 'Template=<name>(<OID>), Major Version Number=<n>, Minor Version Number=<n>'. Anchoring on the parentheses prevents a partial match against a longer OID that begins with the same value.
     $TemplatePattern = '\({0}\)' -f [regex]::Escape($TemplateOid)
 
-    # Determine the fully qualified domain name of this domain controller for subject alternative name and TLS handshake validation
+    # Determine the fully qualified domain name of this domain controller for logging and for the TLS handshake used to verify the bound certificate. The certificate itself is matched against the LDAPS service name rather than this name because clients connect through the load balancer using the service name.
     $ComputerSystem = Get-CimInstance -ClassName Win32_ComputerSystem
     $DcFqdn = '{0}.{1}' -f $ComputerSystem.DNSHostName, $ComputerSystem.Domain
     $Now = Get-Date
 
-    Write-Verbose "Update-DcLdapsCertificate starting on $DcFqdn."
-    Write-Verbose "Searching Cert:\LocalMachine\My for certificates issued from template '$TemplateOid' valid for '$DcFqdn'."
+    Write-Verbose "Update-DcLdapsCertificate starting on $DcFqdn for LDAPS service name '$LdapsServiceName'."
+    Write-Verbose "Searching Cert:\LocalMachine\My for certificates issued from template '$TemplateOid' valid for '$LdapsServiceName'."
 
     # Find all certificates issued from the specified template
     $TemplateCertificates = @(Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object {
@@ -204,7 +213,7 @@ Try {
         If ($Certificate.NotBefore -gt $Now) { $Reasons += "not valid until $($Certificate.NotBefore)" }
         If ($Certificate.NotAfter -le $Now) { $Reasons += "expired $($Certificate.NotAfter)" }
         If ($Certificate.EnhancedKeyUsageList.ObjectId -notcontains $ServerAuthEkuOid) { $Reasons += 'missing Server Authentication EKU' }
-        If ($Certificate.DnsNameList.Unicode -notcontains $DcFqdn) { $Reasons += "subject alternative name does not include '$DcFqdn'" }
+        If ($Certificate.DnsNameList.Unicode -notcontains $LdapsServiceName) { $Reasons += "subject alternative name does not include '$LdapsServiceName'" }
 
         # Chain validation is only meaningful for a time valid certificate. Verify() also fails for an expired certificate, which would duplicate the reason above.
         If ($Certificate.NotBefore -le $Now -and $Certificate.NotAfter -gt $Now -and -not $Certificate.Verify()) { $Reasons += 'does not chain to a trusted root or is revoked' }
@@ -226,7 +235,7 @@ Try {
 
     If ($Candidates.Count -eq 0) {
 
-        Throw "No valid certificate issued from template '$TemplateOid' was found in Cert:\LocalMachine\My. The certificate must be time valid, have a private key, include the Server Authentication EKU, contain '$DcFqdn' in the subject alternative name, and chain to a trusted root. No changes were made."
+        Throw "No valid certificate issued from template '$TemplateOid' was found in Cert:\LocalMachine\My. The certificate must be time valid, have a private key, include the Server Authentication EKU, contain '$LdapsServiceName' in the subject alternative name, and chain to a trusted root. No changes were made."
 
     }
 
@@ -367,10 +376,10 @@ Try {
 
             Write-Verbose "Connecting to $DcFqdn on port 636 to verify the certificate LDAPS is serving."
 
-            # Certificate validation is intentionally bypassed here because the purpose is only to read which certificate the server presents
+            # The connection is made directly to this domain controller rather than to the load balanced service name so the certificate served by this server is the one verified. Certificate validation is intentionally bypassed because the purpose is only to read which certificate the server presents. The LDAPS service name is passed as the target host to mirror what a client connecting through the load balancer would send.
             $TcpClient = New-Object -TypeName System.Net.Sockets.TcpClient -ArgumentList $DcFqdn, 636
             $TlsStream = New-Object -TypeName System.Net.Security.SslStream -ArgumentList $TcpClient.GetStream(), $false, ({ $true } -as [System.Net.Security.RemoteCertificateValidationCallback])
-            $TlsStream.AuthenticateAsClient($DcFqdn)
+            $TlsStream.AuthenticateAsClient($LdapsServiceName)
             $ServedCertificate = New-Object -TypeName System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $TlsStream.RemoteCertificate
 
             If ($ServedCertificate.Thumbprint -eq $NewThumbprint) {
@@ -464,10 +473,10 @@ Finally {
 }
 
 # SIG # Begin signature block
-# MIIk7QYJKoZIhvcNAQcCoIIk3jCCJNoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIk7AYJKoZIhvcNAQcCoIIk3TCCJNkCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwfWw7JkZfPe70
-# eGZkk3OUZM6eyVHK3sNJZzVjVPWiW6CCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDL51MDT5apvO/D
+# iRK9du+amP7nZTBrS54xEol1WeSv/qCCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -636,30 +645,29 @@ Finally {
 # 3FLje1O5b3HR5eHs0NzU/+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94l
 # bUveOiJBI+xZEbGRsMNbXmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H
 # 5Mh7QfieAIjWagkJNt68Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCya
-# tf8R1hSjzSvdN8yWQPT9gzGCBJ0wggSZAgEBMH0waTELMAkGA1UEBhMCVVMxFzAV
+# tf8R1hSjzSvdN8yWQPT9gzGCBJwwggSYAgEBMH0waTELMAkGA1UEBhMCVVMxFzAV
 # BgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVk
 # IEc0IENvZGUgU2lnbmluZyBSU0E0MDk2IFNIQTM4NCAyMDIxIENBMQIQDsYrSCrm
 # UJuvTRscProh/zANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA+Br2Iy0PEunPmEBkJRCKh
-# Vfh85kF76WK9CtcCyVT6YzALBgcqhkjOPQIBBQAESDBGAiEA/QGr9LvUXh1bfFiH
-# /8oHVEuekIuhJt+kgzE0bFG3mq8CIQC7mb4bMYu4A825UkAIcsI9AdpACw4nVR5p
-# S9zTP6LoD6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNV
-# BAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNl
-# cnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBD
-# QTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0B
-# CQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjEyMTQwMzBaMC8G
-# CSqGSIb3DQEJBDEiBCBTA9oJt8U0CIzNbucx/Xoij3FXwsfOdgzCSGS7kn7PTzAN
-# BgkqhkiG9w0BAQEFAASCAgADXSM83lYhhxDOiRkaVIRKBbOdVWHD7ZbhQHTPwsnk
-# 8fWtIqHptJUKWoB/5O+X+CVwJOEsld9keMW5iMYM9NMUxnAZYbPxRs7hv00r7S96
-# 1g3OLnnmsRkzu1L1ljxxWm1emY477oJlTKp6oPf60dpwam1SbAMw+/eFJCxIm9Uw
-# S6+d5HrASLxfJWfiRAeo/26Dt+kPhPQ9irWbu5KcBct1eG0HiQxLC1J3m1bCe0/z
-# Pf0d/6nlGhnB0l38IgDioBD3U2vZOW0ViaCJ4B8TuP4n98KTaGVZ4Odp/3bsjFK5
-# AAvOwCDX94dLiIcQT5BJ1n9FI271wkFa0c3jkU0ZzlNfAWoUhq4ImKbblRxb7Dxi
-# QFwgmG0fKtHFzbD7KkG/PH3K0PUIv/9mUqnn4B60KP+ws6gkSLUA1s65FrhEgFLN
-# ukxuYXaOWqXxsr85gWTzjhBZzSMXcxuAK40ht64ItCK3ySViyBmLTw6b3G89GxQD
-# gp3mpo50ezv93UUwBgm0Ltt1JyFuQCvsnCa/YajgPfNV2QVm8/+gK+BlIEpvjYS+
-# ydV1cO3X/YDyXgbBcJ6fFXoM4EmyfZZTNRB1tthtvoNKHyXemxkizL4jpj7qsgC8
-# eHIhYmzo6WDp7VmB5ZdhvvpasvYpv0pKEVNNShMq3YwBC2qzwK/U/tYasXQNdAz4
-# KA==
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDVlzFbrf7dT0RxX3HcqxEJ
+# 3vtd6uebn/5woMd8ItilrDALBgcqhkjOPQIBBQAERzBFAiBwJD9M6KOrW6hiEOC4
+# ijtptDEKE9FornTuvN4H0hKgawIhAObBUt8d3/M7+fXSwznmmDk3yv9fgJ9tfSP7
+# unhg+sEWoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UE
+# BhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2Vy
+# dCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENB
+# MQIQCE/cM09+RU7bww+P+ZIYNTANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJ
+# AzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkyMTIyMjY0NVowLwYJ
+# KoZIhvcNAQkEMSIEIHazI/1Ub8NzuoaPlvXmMt8zi0FKb7JnqDtiK7/c+MSAMA0G
+# CSqGSIb3DQEBAQUABIICAF47d8YzDDh8vlkYNRtUxau0l0JMGzv7Ouc8MeHtPCGC
+# 39L0ChhV7HLqYb+GfrHBHXpVPbC3OGFQy4s8Jmx+/PTM3QI9f77i2B9lne6WHrcN
+# TJRIF+X2mHjbgQ4p9P2KyTZkcrFKDbGMzqHgW++++jqHVeEfsbjJ6WKSa0HCoSQr
+# l3HwiT6Jyuk69lusQHNdHTNtuuG5KQDjk47POlnGSR7Es8iLX3PkFUZAIqXgQzYE
+# U5mczUh7Oix/CsWAE9sFVM6HjXEuXxbcKYIPMAFBPVz8n0xJzKU5nrsR5ghTquHd
+# nr86FVw9+5oNONl7vXH2Rft7P8bc2I+qKwWXYoeUk8WtNxjaOeQ8jqnJOoagqYxH
+# T7lafAIIQIZceNMQ324k81sG+EyyFl0WI8LJTjzm7rQH+03TaVlRSIkIF7VYSFB0
+# 0364MmFQBMpuPKpSHhNwthXX1XcPKJrVVJbTnvZDPflDIMwW7y+tTwHS0LDnU5k+
+# 32ZasHat5bpjB4ixJ2dL1qhPr4TAdP1l8j/mFt2wxe9f569BnKrJY0EpMn6wvUa6
+# 9MCaFMO2DNfKrsnGZnWCG2OojKWiEm4w4WB+AbIAwGZrY/DIZthYYgaRFwfRKSZJ
+# Y1xFSdGFBi27u2NxbTy1yaZ03eMxy9OuX5P0Po/wPGOVrLE35HEvTPLqJpeeZJaf
 # SIG # End signature block
