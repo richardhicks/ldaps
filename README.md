@@ -6,9 +6,9 @@ Automates binding autoenrolled certificates to the NTDS service certificate stor
 
 ## Overview
 
-Active Directory Domain Services (AD DS) preferentially uses certificates in the NTDS service's personal certificate store for LDAPS. Certificates enrolled or renewed through autoenrollment land in the local machine personal store, not the NTDS store, so they are not used for LDAPS until they are copied there. Left unattended, a renewed certificate sits unused while LDAPS continues to serve the expiring one.
+Active Directory Domain Services (AD DS) preferentially uses certificates in the NTDS service's personal certificate store for LDAPS. Certificates enrolled or renewed through autoenrollment land in the local machine personal certificate store, not the NTDS store, so they are not used for LDAPS until they are copied there. Left unattended, a renewed certificate sits unused while LDAPS continues to serve the expiring one.
 
-These scripts are designed for domain controllers placed behind a load balancer to provide a highly available LDAPS service. In that design, clients connect to a single LDAPS service name (for example, `ldaps.lab.richardhicks.net`) that resolves to the load balancer's virtual IP address rather than to an individual domain controller. Every domain controller in the pool must therefore present a certificate that includes the LDAPS service name in the subject alternative name. That certificate is typically issued from a dedicated template alongside the default domain controller certificate, leaving multiple server authentication certificates in the local machine store. The scripts select the certificate by template and by the presence of the LDAPS service name, so each domain controller consistently serves the certificate the load balancer and its clients expect. The domain controller's own FQDN is not required to be present on the certificate.
+These scripts are designed for domain controllers placed behind a load balancer to provide a highly available LDAPS service. In that design, clients connect to a single LDAPS service name (for example, `ldaps.corp.example.net`) that resolves to the load balancer's virtual IP address rather than to an individual domain controller. Every domain controller in the pool must therefore present a certificate that includes the LDAPS service name in the subject alternative name. That certificate is typically issued from a dedicated template alongside the default domain controller certificate, leaving multiple server authentication certificates in the local machine store. The scripts select the certificate by template and by the presence of the LDAPS service name, so each domain controller consistently serves the certificate the load balancer and its clients expect. The domain controller's FQDN does not need to be present on the certificate.
 
 Two scripts work together to close that gap:
 
@@ -17,7 +17,7 @@ Two scripts work together to close that gap:
 | `Update-DcLdapsCertificate.ps1` | Finds the newest valid certificate issued from a specified template that includes the LDAPS service name in the subject alternative name, binds it to the NTDS service store, removes any previous certificates, and verifies LDAPS is serving the new certificate |
 | `Register-DcLdapsCertificateTask.ps1` | Registers an event-triggered scheduled task that runs `Update-DcLdapsCertificate.ps1` whenever a new server authentication certificate is installed on the domain controller |
 
-Run `Register-DcLdapsCertificateTask.ps1` once on each domain controller in the load balanced pool, supplying the certificate template OID and the LDAPS service name. From then on, each autoenrollment renewal triggers `Update-DcLdapsCertificate.ps1` automatically.
+Run `Register-DcLdapsCertificateTask.ps1` once on each domain controller in the load-balanced pool, supplying the certificate template OID and the LDAPS service name. From then on, each autoenrollment renewal automatically triggers `Update-DcLdapsCertificate.ps1`.
 
 > **Important:** Both scripts must be run on the domain controller itself. They operate on the local certificate stores and the local AD DS instance and do not support remote targets.
 
@@ -45,22 +45,22 @@ Binds the newest valid certificate issued from a specified certificate template 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `TemplateOid` | Yes | Object identifier (OID) of the certificate template used to issue the LDAPS certificate. Find it in the Certificate Templates console (`certtmpl.msc`) on the Extensions tab of the template under Certificate Template Information, or by running `Get-CertificateTemplate` from the ADCSTemplate module |
-| `LdapsServiceName` | Yes | Fully qualified DNS name clients use to connect to the load balanced LDAPS service, for example `ldaps.lab.richardhicks.net`. Only certificates that include this name in the subject alternative name are considered. The domain controller's own FQDN is not required |
+| `LdapsServiceName` | Yes | Fully qualified DNS name clients use to connect to the load-balanced LDAPS service, for example `ldaps.lab.richardhicks.net`. Only certificates that include this name in the subject alternative name are considered. The domain controller's own FQDN is not required |
 
 ### What the Script Does
 
-1. Searches the local machine personal certificate store for certificates issued from the specified template OID and evaluates each one. A certificate qualifies only if it is time valid, has an associated private key, includes the Server Authentication enhanced key usage, contains the LDAPS service name in the subject alternative name, and chains to a trusted root. Each certificate and the reason it was accepted or rejected is recorded in the log
+1. Searches the local machine's personal certificate store for certificates issued from the specified template OID and evaluates each one. A certificate qualifies only if it is time-valid, has an associated private key, includes the Server Authentication enhanced key usage, contains the LDAPS service name in the subject alternative name, and chains to a trusted root. Each certificate and the reason it was accepted or rejected is recorded in the log
 2. Selects the qualifying certificate with the latest expiration date. If no certificate qualifies, the script terminates before making any changes
 3. Reads the certificates currently bound to the NTDS service store and records them in the log. If the selected certificate is already bound, the import step is skipped
-4. Imports the selected certificate into the NTDS service store and reads the store back to confirm it was added. If verification fails, the script terminates and no existing certificates are removed
+4. Imports the selected certificate into the NTDS service store and reads the store back to confirm it was added. If verification fails, the script terminates, and no existing certificates are removed
 5. Removes any other certificates from the NTDS service store. The newly bound certificate is never removed
 6. Signals AD DS to reload its server certificate using the `renewServerCertificate` rootDSE operation
-7. Performs a TLS handshake to port 636 on the domain controller itself, passing the LDAPS service name as the target host, and warns if the certificate being served does not match the newly bound certificate. The connection is made directly to the domain controller rather than to the load balancer so the certificate served by this specific server is verified
+7. Performs a TLS handshake to port 636 on the domain controller itself, passing the LDAPS service name as the target host, and warns if the certificate being served does not match the newly bound certificate. The connection is made directly to the domain controller rather than to the load balancer, so the certificate served by this specific server is verified
 8. Writes a completion summary stating whether the certificate was imported or already bound and how many previous certificates were removed
 
 ### Logging
 
-A transcript of each run is written to `%ProgramData%\RMHCI\PowerShell\Update-DcLdapsCertificate.log`. Verbose output is always enabled, so the transcript records each certificate evaluated, the contents of the NTDS service store before any change, each decision made, and the completion summary. The log file is overwritten on each run. If an error occurs, the error is recorded in the transcript and the script exits with code 1.
+A transcript of each run is written to `%ProgramData%\RMHCI\PowerShell\Update-DcLdapsCertificate.log`. Verbose output is always enabled, so the transcript records each certificate evaluated, the contents of the NTDS service store before any change, each decision made, and the completion summary. The log file is overwritten on each run. If an error occurs, the error is recorded in the transcript, and the script exits with code 1.
 
 Key outcomes are also written to the Application event log using the event source `Update-DcLdapsCertificate`, which is registered automatically on first run. Transcript entries carry the same event ID so the two logs can be correlated.
 
@@ -99,7 +99,7 @@ Registers a scheduled task that runs `Update-DcLdapsCertificate.ps1` in response
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `TemplateOid` | Yes | OID of the certificate template used to issue the LDAPS certificate. Passed to `Update-DcLdapsCertificate.ps1` each time the task runs |
-| `LdapsServiceName` | Yes | Fully qualified DNS name clients use to connect to the load balanced LDAPS service, for example `ldaps.lab.richardhicks.net`. Passed to `Update-DcLdapsCertificate.ps1` each time the task runs |
+| `LdapsServiceName` | Yes | Fully qualified DNS name clients use to connect to the load-balanced LDAPS service, for example `ldaps.lab.richardhicks.net`. Passed to `Update-DcLdapsCertificate.ps1` each time the task runs |
 | `ScriptPath` | No | Full path to `Update-DcLdapsCertificate.ps1`. Defaults to a file of that name in the same folder as this script. The file must exist when the task is registered |
 | `TaskName` | No | Name of the scheduled task. Defaults to `Update DC LDAPS Certificate` |
 
@@ -115,7 +115,7 @@ Registers a scheduled task that runs `Update-DcLdapsCertificate.ps1` in response
 
 The task is triggered only by events. It has no time-based trigger and never runs on a schedule. The trigger subscribes to the certificate lifecycle event log and fires on event ID 1006 (a new certificate has been installed) or event ID 1001 (a certificate has been replaced) where the certificate was installed in the machine context and includes the Server Authentication enhanced key usage. Certificates installed in a user context, and machine certificates without the Server Authentication EKU, do not trigger the task.
 
-A one minute delay is applied before the task starts so autoenrollment has finished writing the certificate and private key. The task runs a single instance at a time with a 30 minute execution time limit so a hung run cannot block the next trigger.
+A one-minute delay is applied before the task starts so autoenrollment has finished writing the certificate and private key. The task runs a single instance at a time with a 30-minute execution time limit, so a hung run cannot block the next trigger.
 
 ### Examples
 
@@ -142,14 +142,14 @@ A one minute delay is applied before the task starts so autoenrollment has finis
 
 ## Notes
 
-- Both scripts support `-WhatIf` and `-Confirm`. During a `-WhatIf` run of `Update-DcLdapsCertificate.ps1`, a transcript is still written but no event log entries are created.
+- Both scripts support `-WhatIf` and `-Confirm`. During a `-WhatIf` run of `Update-DcLdapsCertificate.ps1`, a transcript is still written, but no event log entries are created.
 - `Update-DcLdapsCertificate.ps1` is idempotent. If the newest qualifying certificate is already bound to the NTDS service store, it reports event 1001 and makes no changes. It is safe to run manually at any time.
 - Because certificate installation events are also raised when a certificate is installed manually, the scheduled task can run in response to a manual installation of a qualifying certificate. This has no effect unless the installed certificate was issued from the specified template and includes the LDAPS service name.
 - Place `Update-DcLdapsCertificate.ps1` in a location that persists on the domain controller, such as `C:\Scripts`, before registering the task. The scheduled task references the script by its full path and will fail if the file is later moved or deleted.
 - The scheduled task runs as SYSTEM. The NTDS service certificate store and the certificate private key require this level of access.
 - After a new certificate is bound, AD DS may take a short time to begin serving it. Event 2002 indicates the old certificate is still being served at the moment of verification and is usually transient. Run `Update-DcLdapsCertificate.ps1` again or check the log on the next trigger if the warning persists.
 - `Update-DcLdapsCertificate.ps1` requires the LDAPS service name in the subject alternative name and does not check for the domain controller's own FQDN. If clients also connect to individual domain controllers by name over LDAPS, include the domain controller's FQDN in the template as well so those connections validate. The scripts do not enforce this.
-- Use the same LDAPS service name on every domain controller in the load balanced pool. The name is stored in the scheduled task's action arguments, so re-run `Register-DcLdapsCertificateTask.ps1` if the service name changes.
+- Use the same LDAPS service name on every domain controller in the load-balanced pool. The name is stored in the scheduled task's action arguments, so re-run `Register-DcLdapsCertificateTask.ps1` if the service name changes.
 - To review recent runs, check the transcript at `%ProgramData%\RMHCI\PowerShell\Update-DcLdapsCertificate.log` and filter the Application event log for the source `Update-DcLdapsCertificate`.
 
 ## Additional Resources
