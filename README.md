@@ -44,7 +44,7 @@ Binds the newest valid certificate issued from a specified certificate template 
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `TemplateOid` | Yes | Object identifier (OID) of the certificate template used to issue the LDAPS certificate. Find it in the Certificate Templates console (`certtmpl.msc`) on the Extensions tab of the template under Certificate Template Information, or by running `Get-CertificateTemplate` from the [https://github.com/richardhicks/adcstools/]ADCSTools module |
+| `TemplateOid` | Yes | Object identifier (OID) of the certificate template used to issue the LDAPS certificate. Find it in the Certificate Templates console (`certtmpl.msc`) on the Extensions tab of the template under Certificate Template Information, or by running `Get-CertificateTemplate` from the [ADCSTools](https://github.com/richardhicks/adcstools/) module |
 | `LdapsServiceName` | Yes | Fully qualified DNS name clients use to connect to the load-balanced LDAPS service, for example `ldaps.lab.richardhicks.net`. Only certificates that include this name in the subject alternative name are considered. The domain controller's own FQDN is not required |
 
 ### What the Script Does
