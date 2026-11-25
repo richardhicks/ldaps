@@ -35,7 +35,7 @@
     This script requires Administrator privileges, Windows PowerShell 5.1, and the ServiceCertStore PowerShell module (https://www.powershellgallery.com/packages/ServiceCertStore/). Run it on each domain controller in the load balanced pool.
 
 .PARAMETER TemplateOid
-    The object identifier (OID) of the certificate template used to issue the LDAPS certificate. The template OID can be found in the Certificate Templates console (certtmpl.msc) on the Extensions tab of the template under Certificate Template Information, or by running Get-CertificateTemplate from the ADCSTemplate module.
+    The object identifier (OID) of the certificate template used to issue the LDAPS certificate. The template OID can be found in the Certificate Templates console (certtmpl.msc) on the Extensions tab of the template under Certificate Template Information, or by running Get-CertificateTemplate from the ADCSTools module.
 
 .PARAMETER LdapsServiceName
     The fully qualified DNS name clients use to connect to the load balanced LDAPS service, for example ldaps.lab.richardhicks.net. Only certificates that include this name in the subject alternative name are considered for binding. The domain controller's own fully qualified domain name is not required to be present on the certificate.
@@ -66,9 +66,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        1.0
+    Version:        1.0.1
     Creation Date:  September 21, 2026
-    Last Updated:   September 21, 2026
+    Last Updated:   November 25, 2026
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
     Contact:        rich@richardhicks.com
@@ -471,12 +471,11 @@ Finally {
     }
 
 }
-
 # SIG # Begin signature block
 # MIIk7AYJKoZIhvcNAQcCoIIk3TCCJNkCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDL51MDT5apvO/D
-# iRK9du+amP7nZTBrS54xEol1WeSv/qCCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA0BjBLPhguV+py
+# U9ag53F2vrlY+1ub4kmr3Xun6TMWEaCCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -650,24 +649,24 @@ Finally {
 # IEc0IENvZGUgU2lnbmluZyBSU0E0MDk2IFNIQTM4NCAyMDIxIENBMQIQDsYrSCrm
 # UJuvTRscProh/zANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDVlzFbrf7dT0RxX3HcqxEJ
-# 3vtd6uebn/5woMd8ItilrDALBgcqhkjOPQIBBQAERzBFAiBwJD9M6KOrW6hiEOC4
-# ijtptDEKE9FornTuvN4H0hKgawIhAObBUt8d3/M7+fXSwznmmDk3yv9fgJ9tfSP7
-# unhg+sEWoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UE
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCtiOYFNQT95ZnT8c7Gj41+
+# WqTioGIYMhfX6OpvvM6olzALBgcqhkjOPQIBBQAERzBFAiAmjkLghXSxR5A8WJM9
+# 99+4g5RiF61F3ob9quuJtGYaOwIhAPk/wYlT0rXDtwRkQClgiUygy5fH40BGYUf5
+# 0y/Qa39RoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UE
 # BhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2Vy
 # dCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENB
 # MQIQCE/cM09+RU7bww+P+ZIYNTANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJ
-# AzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkyMTIyMjY0NVowLwYJ
-# KoZIhvcNAQkEMSIEIHazI/1Ub8NzuoaPlvXmMt8zi0FKb7JnqDtiK7/c+MSAMA0G
-# CSqGSIb3DQEBAQUABIICAF47d8YzDDh8vlkYNRtUxau0l0JMGzv7Ouc8MeHtPCGC
-# 39L0ChhV7HLqYb+GfrHBHXpVPbC3OGFQy4s8Jmx+/PTM3QI9f77i2B9lne6WHrcN
-# TJRIF+X2mHjbgQ4p9P2KyTZkcrFKDbGMzqHgW++++jqHVeEfsbjJ6WKSa0HCoSQr
-# l3HwiT6Jyuk69lusQHNdHTNtuuG5KQDjk47POlnGSR7Es8iLX3PkFUZAIqXgQzYE
-# U5mczUh7Oix/CsWAE9sFVM6HjXEuXxbcKYIPMAFBPVz8n0xJzKU5nrsR5ghTquHd
-# nr86FVw9+5oNONl7vXH2Rft7P8bc2I+qKwWXYoeUk8WtNxjaOeQ8jqnJOoagqYxH
-# T7lafAIIQIZceNMQ324k81sG+EyyFl0WI8LJTjzm7rQH+03TaVlRSIkIF7VYSFB0
-# 0364MmFQBMpuPKpSHhNwthXX1XcPKJrVVJbTnvZDPflDIMwW7y+tTwHS0LDnU5k+
-# 32ZasHat5bpjB4ixJ2dL1qhPr4TAdP1l8j/mFt2wxe9f569BnKrJY0EpMn6wvUa6
-# 9MCaFMO2DNfKrsnGZnWCG2OojKWiEm4w4WB+AbIAwGZrY/DIZthYYgaRFwfRKSZJ
-# Y1xFSdGFBi27u2NxbTy1yaZ03eMxy9OuX5P0Po/wPGOVrLE35HEvTPLqJpeeZJaf
+# AzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MTEyNTIxMDQzOFowLwYJ
+# KoZIhvcNAQkEMSIEIOi8DGT6Z3gsXryLEXbedADtXEdD6zn9O2svKbqxYBG5MA0G
+# CSqGSIb3DQEBAQUABIICADxRvqL0N83glWeFoSzuIg5VOjfktu7HwCsXjbM4ivKp
+# lrnhQBzF1HfS/qv0YcEI6yV/qc4EIb6Rx1OJM9wF8Y4aS7HOBlzUMYZOZdeSNbcD
+# tif8bSP3KJvhIFv48JN6rAZhqP+6wvb+GTyWrWTNKaIsHh5QZmN3pEW+FFsvc9/K
+# j/NbEQMiiPg7/tXJ5Td5Sj91oHcIFIbwfzeRZajip8NUqB06AbRJZaq+G8jWGWsa
+# 2dkLKu1HI24tc9AfshhE619OHM/h8ynMuUjD8r/xLYa+f88yN9GU0l8/YWQoR40I
+# zbU8q93bsnsLPIqLiUSBIB6y+VjHoV5lyRYpOaztWjYiNaHWM01gfPVB/XSHXQ6L
+# nFaOp6Ghq8fOUTI1aqtG39Lt/HXlsi68eMZH3uY1Ya1kmsAozfER9cILdtTtNx4s
+# hW9DWRNZwdfuzg8A7qODtQhdxq3rufZcMvYe7LeJXa7MYIheAc+St1UArLVbOX01
+# j14pmdxjYdhNllg5A+XEJHCnRfYcXaQR77jhhu/mPiSYQ+LsSVzE+nqG9qiPsQ1P
+# snfjOX2LCaNC5HSmrg7NYYQEWPjenOQAQrue1w6SXoCrzKHN8qWaSia3buWmPG1Z
+# sXM4X9wL51wUt7TbOhsstDHbmR8rtEaAedvyoJ70TrEVVkyiah789mGOvV59+wnY
 # SIG # End signature block
