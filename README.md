@@ -26,7 +26,7 @@ Run `Register-DcLdapsCertificateTask.ps1` once on each domain controller in the 
 - Windows Server domain controller with Windows PowerShell 5.1
 - Must be run as Administrator
 - The [ServiceCertStore](https://www.powershellgallery.com/packages/ServiceCertStore/) PowerShell module installed on the domain controller (required by `Update-DcLdapsCertificate.ps1`)
-- A certificate template configured for domain controller LDAPS that includes the Server Authentication enhanced key usage and the LDAPS service name (for example, `ldaps.lab.richardhicks.net`) in the subject alternative name so clients connecting through the load balancer can validate the certificate. The domain controller's own FQDN is not required by the scripts, but it may be included if clients also connect to individual domain controllers by name
+- A certificate template configured for domain controller LDAPS that includes the Server Authentication enhanced key usage and the LDAPS service name (for example, `ldaps.corp.example.net`) in the subject alternative name so clients connecting through the load balancer can validate the certificate. The domain controller's own FQDN is not required by the scripts, but it may be included if clients also connect to individual domain controllers by name
 - A DNS record for the LDAPS service name that resolves to the load balancer's virtual IP address
 - Certificate autoenrollment configured so domain controllers enroll and renew certificates from that template
 
@@ -45,7 +45,7 @@ Binds the newest valid certificate issued from a specified certificate template 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `TemplateOid` | Yes | Object identifier (OID) of the certificate template used to issue the LDAPS certificate. Find it in the Certificate Templates console (`certtmpl.msc`) on the Extensions tab of the template under Certificate Template Information, or by running `Get-CertificateTemplate` from the [ADCSTools](https://github.com/richardhicks/adcstools/) module |
-| `LdapsServiceName` | Yes | Fully qualified DNS name clients use to connect to the load-balanced LDAPS service, for example `ldaps.lab.richardhicks.net`. Only certificates that include this name in the subject alternative name are considered. The domain controller's own FQDN is not required |
+| `LdapsServiceName` | Yes | Fully qualified DNS name clients use to connect to the load-balanced LDAPS service, for example `ldaps.corp.example.net`. Only certificates that include this name in the subject alternative name are considered. The domain controller's own FQDN is not required |
 
 ### What the Script Does
 
@@ -81,13 +81,13 @@ Key outcomes are also written to the Application event log using the event sourc
 **Bind the newest certificate from the template:**
 
 ```powershell
-.\Update-DcLdapsCertificate.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.lab.richardhicks.net'
+.\Update-DcLdapsCertificate.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.corp.example.net'
 ```
 
 **Preview the changes without making them:**
 
 ```powershell
-.\Update-DcLdapsCertificate.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.lab.richardhicks.net' -WhatIf
+.\Update-DcLdapsCertificate.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.corp.example.net' -WhatIf
 ```
 
 ## Register-DcLdapsCertificateTask.ps1
@@ -99,7 +99,7 @@ Registers a scheduled task that runs `Update-DcLdapsCertificate.ps1` in response
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `TemplateOid` | Yes | OID of the certificate template used to issue the LDAPS certificate. Passed to `Update-DcLdapsCertificate.ps1` each time the task runs |
-| `LdapsServiceName` | Yes | Fully qualified DNS name clients use to connect to the load-balanced LDAPS service, for example `ldaps.lab.richardhicks.net`. Passed to `Update-DcLdapsCertificate.ps1` each time the task runs |
+| `LdapsServiceName` | Yes | Fully qualified DNS name clients use to connect to the load-balanced LDAPS service, for example `ldaps.corp.example.net`. Passed to `Update-DcLdapsCertificate.ps1` each time the task runs |
 | `ScriptPath` | No | Full path to `Update-DcLdapsCertificate.ps1`. Defaults to a file of that name in the same folder as this script. The file must exist when the task is registered |
 | `TaskName` | No | Name of the scheduled task. Defaults to `Update DC LDAPS Certificate` |
 
@@ -122,7 +122,7 @@ A one-minute delay is applied before the task starts so autoenrollment has finis
 **Register the task using the update script in the same folder:**
 
 ```powershell
-.\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.lab.richardhicks.net'
+.\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.corp.example.net'
 ```
 
 **Register the task using a copy of the update script in a different folder:**
@@ -130,14 +130,14 @@ A one-minute delay is applied before the task starts so autoenrollment has finis
 ```powershell
 .\Register-DcLdapsCertificateTask.ps1 `
     -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' `
-    -LdapsServiceName 'ldaps.lab.richardhicks.net' `
+    -LdapsServiceName 'ldaps.corp.example.net' `
     -ScriptPath 'C:\Scripts\Update-DcLdapsCertificate.ps1'
 ```
 
 **Preview the changes without making them:**
 
 ```powershell
-.\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.lab.richardhicks.net' -WhatIf
+.\Register-DcLdapsCertificateTask.ps1 -TemplateOid '1.3.6.1.4.1.311.21.8.8722825.6961687.14830235.11733548.12561660.205.9081263.14230042' -LdapsServiceName 'ldaps.corp.example.net' -WhatIf
 ```
 
 ## Notes
